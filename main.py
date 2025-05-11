@@ -1,11 +1,19 @@
 import asyncio
-from pathlib import Path
-import yaml # For loading config, install with: uv pip install pyyaml
-import os
 import hashlib
-from datetime import datetime, timezone # Added timezone
-import time
-from typing import Any, Dict, List, Optional, Tuple, Union, cast
+import os
+from datetime import datetime, timezone  # Added timezone
+from pathlib import Path
+
+
+import logfire
+import yaml  # For loading config, install with: uv pip install pyyaml
+from openai import AsyncOpenAI
+
+from deps import VaultCtx
+from runner import run_observer
+
+logfire.configure()
+
 
 # Assuming your project structure is:
 # project_root/
@@ -20,11 +28,10 @@ from typing import Any, Dict, List, Optional, Tuple, Union, cast
 #      ├── __init__.py
 #      └── backlinker.py
 
-from runner import run_observer
-from deps import VaultCtx
-
 # Use the official OpenAI library for creating embeddings
-from openai import AsyncOpenAI
+
+
+
 
 # Attempt to import database drivers
 try:
@@ -34,9 +41,9 @@ except ImportError:
     duckdb = None
 
 try:
-    from tinydb import TinyDB, Query
-    from tinydb.storages import JSONStorage
+    from tinydb import Query, TinyDB
     from tinydb.middlewares import CachingMiddleware
+    from tinydb.storages import JSONStorage
 except ImportError:
     print("Warning: tinydb is not installed. `uv pip install tinydb`")
     TinyDB = None
@@ -47,8 +54,8 @@ DEFAULT_CONFIG_PATH = "config.yaml"
 DB_SCHEMA_VERSION = 5 # Increment if schema changes (e.g. storing text content)
 
 # --- BEGIN LOGFIRE SETUP ---
-import logfire
-logfire.configure()
+# import logfire # Removed from here
+# logfire.configure() # Removed from here
 # You can also instrument other libraries here if needed, e.g.:
 # logfire.instrument_httpx(capture_all=True)
 # logfire.instrument_duckdb() # Check logfire docs for specific db instrumentation
@@ -78,7 +85,7 @@ def get_embedding_client(config: dict) -> AsyncOpenAI:
     print(f"[Embedding] Initializing AsyncOpenAI client for embeddings (model info: {model_name_info}) at {base_url}")
     return AsyncOpenAI(base_url=base_url, api_key=api_key)
 
-async def populate_notes_db(db: duckdb.DuckDBPyConnection, vault_root: Path, embed_client: AsyncOpenAI, config: dict):
+async def populate_notes_db(db: duckdb.DuckDBPyConnection, vault_root: Path, embed_client: AsyncOpenAI, config: dict): # type: ignore
     """Scans the vault, generates embeddings, and populates the DuckDB notes table."""
     print("[DB Population] Starting to populate/update notes database...")
 
@@ -268,7 +275,7 @@ async def populate_notes_db(db: duckdb.DuckDBPyConnection, vault_root: Path, emb
         # The index helps find smallest cosine_distance, which is largest array_cosine_similarity.
         # IF NOT EXISTS is used to avoid errors if the index already exists (e.g., from a previous run).
         # --- BEGIN MODIFICATION: Use f-string for dimension in CREATE INDEX ---
-        db.execute(f"""
+        db.execute("""
         CREATE INDEX IF NOT EXISTS hnsw_embedding_idx 
         ON notes USING HNSW (embedding) 
         WITH (metric = 'cosine', M = 16, ef_construction = 100);
@@ -361,11 +368,13 @@ async def initialize_vault_context(config: dict) -> VaultCtx:
                     if "cannot be called when another loop is running" in str(e):
                         # This specific error should no longer occur with the new structure
                         print(f"[DB Population] Error: {e}. This was unexpected with the async refactor.")
-                    else: raise
+                    else: 
+                        raise
             print(f"DuckDB connection established and population attempted: {db_path}")
         except Exception as e:
             print(f"Error initializing DuckDB or populating notes: {e}")
-            if db_conn: db_conn.close() # Close if opened before error
+            if db_conn: 
+                db_conn.close() # Close if opened before error
             db_conn = None
     else:
         print("DuckDB not available. Some features requiring a database will be disabled.")

@@ -330,7 +330,8 @@ async def worker_bee(event_bundle: FsEvent, vault_ctx: VaultCtx):
     if patch.action not in ["CREATE", "DELETE", "APPEND"]: 
         if not patch_target_abs_path.is_file():
             print(f"[WorkerBee] Target file '{patch_target_abs_path}' for patch disappeared or is not a file. Skipping patch.")
-            if vault_ctx.kv: vault_ctx.kv.table("patch_aborted").insert({"timestamp": time.time(), "reason": "target_disappeared", "patch": patch.model_dump() if hasattr(patch, 'model_dump') else str(patch)})
+            if vault_ctx.kv: 
+                vault_ctx.kv.table("patch_aborted").insert({"timestamp": time.time(), "reason": "target_disappeared", "patch": patch.model_dump() if hasattr(patch, 'model_dump') else str(patch)})
             return
         if hasattr(patch, 'target_path') and patch.target_path == event_bundle.path and event_bundle.kind != 'deleted':
             try:
@@ -338,20 +339,24 @@ async def worker_bee(event_bundle: FsEvent, vault_ctx: VaultCtx):
                 current_hash_after_agent = hashlib.md5(current_content_bytes_after_agent).hexdigest()
                 if current_hash_after_agent != initial_content_hash:
                     print(f"[WorkerBee] File '{patch_target_abs_path}' content changed during agent run. Skipping patch.")
-                    if vault_ctx.kv: vault_ctx.kv.table("patch_aborted").insert({"timestamp": time.time(), "reason": "target_modified_during_run", "patch": patch.model_dump() if hasattr(patch, 'model_dump') else str(patch)})
+                    if vault_ctx.kv: 
+                        vault_ctx.kv.table("patch_aborted").insert({"timestamp": time.time(), "reason": "target_modified_during_run", "patch": patch.model_dump() if hasattr(patch, 'model_dump') else str(patch)})
                     return
             except FileNotFoundError:
                 print(f"[WorkerBee] Target file '{patch_target_abs_path}' not found during pre-patch hash check. Skipping.")
-                if vault_ctx.kv: vault_ctx.kv.table("patch_aborted").insert({"timestamp": time.time(), "reason": "target_disappeared_pre_hash", "patch": patch.model_dump() if hasattr(patch, 'model_dump') else str(patch)})
+                if vault_ctx.kv: 
+                    vault_ctx.kv.table("patch_aborted").insert({"timestamp": time.time(), "reason": "target_disappeared_pre_hash", "patch": patch.model_dump() if hasattr(patch, 'model_dump') else str(patch)})
                 return
             except Exception as e:
                 print(f"[WorkerBee] Error re-reading file '{patch_target_abs_path}' for pre-patch check: {e}. Skipping patch.")
-                if vault_ctx.kv: vault_ctx.kv.table("patch_aborted").insert({"timestamp": time.time(), "reason": "target_read_error_pre_patch", "error": str(e), "patch": patch.model_dump() if hasattr(patch, 'model_dump') else str(patch)})
+                if vault_ctx.kv: 
+                    vault_ctx.kv.table("patch_aborted").insert({"timestamp": time.time(), "reason": "target_read_error_pre_patch", "error": str(e), "patch": patch.model_dump() if hasattr(patch, 'model_dump') else str(patch)})
                 return
             
     elif patch.action == "CREATE" and patch_target_abs_path.exists():
         print(f"[WorkerBee] Patch action CREATE, but file '{patch_target_abs_path}' already exists. Skipping to avoid overwrite.")
-        if vault_ctx.kv: vault_ctx.kv.table("patch_aborted").insert({"timestamp": time.time(), "reason": "create_target_exists", "patch": patch.model_dump() if hasattr(patch, 'model_dump') else str(patch)})
+        if vault_ctx.kv: 
+            vault_ctx.kv.table("patch_aborted").insert({"timestamp": time.time(), "reason": "create_target_exists", "patch": patch.model_dump() if hasattr(patch, 'model_dump') else str(patch)})
         return
     elif patch.action == "DELETE" and not patch_target_abs_path.is_file():
          print(f"[WorkerBee] Patch action DELETE, but file '{patch_target_abs_path}' does not exist or not a file. Skipping.")
@@ -371,7 +376,8 @@ async def worker_bee(event_bundle: FsEvent, vault_ctx: VaultCtx):
             patch_target_abs_path.unlink()
         else:
             print(f"[WorkerBee] Unknown or unhandled patch action for generic agent: '{patch.action}'. Not applying.")
-            if vault_ctx.kv: vault_ctx.kv.table("patch_aborted").insert({"timestamp": time.time(), "reason": "unknown_patch_action_generic", "patch": patch.model_dump() if hasattr(patch, 'model_dump') else str(patch)})
+            if vault_ctx.kv: 
+                vault_ctx.kv.table("patch_aborted").insert({"timestamp": time.time(), "reason": "unknown_patch_action_generic", "patch": patch.model_dump() if hasattr(patch, 'model_dump') else str(patch)})
             return
 
         print(f"[WorkerBee] Generic patch applied successfully for '{patch_target_abs_path}' by {agent_to_run.__class__.__name__}")

@@ -4,11 +4,9 @@ from pydantic_ai.providers.openai import OpenAIProvider
 # from pydantic_ai.tools import Tool # Tool class might be used for more complex tool definitions
 from models import Patch
 from deps import VaultCtx
-from tools_common import read_note, write_patch
+from tools_common import write_patch
 from textwrap import dedent
-import asyncio
-from typing import List, Dict, Any, Optional
-from pydantic import Field
+from typing import List, Dict, Any
 from pathlib import Path
 from dataclasses import dataclass
 import re # For checking existing links
@@ -122,7 +120,7 @@ def ensure_patch_integrity(patch: Patch) -> None:
         # Count wikilinks
         before_links = set(re.findall(r"\[\[(.*?)\]\]", patch.before))
         after_links = set(re.findall(r"\[\[(.*?)\]\]", patch.after))
-        newly_added_links = after_links - before_links
+        after_links - before_links
         # This validator might be too strict if the agent also reformats or cleans up.
         # For now, we focus on the "single new link" idea.
         # if len(newly_added_links) > 1:
