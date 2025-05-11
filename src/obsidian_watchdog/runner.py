@@ -19,10 +19,11 @@ PURGE_OLD_EVENTS_SECONDS = 10.0 # Time to wait before flushing an event if no ne
 
 class ChangeHandler(FileSystemEventHandler):
     """Handles file system events and puts them onto an asyncio queue."""
-    def __init__(self, queue: asyncio.Queue, vault_root: Path):
+    def __init__(self, queue: asyncio.Queue, vault_root: Path, vault_ctx: VaultCtx):
         super().__init__()
         self.queue = queue
         self.vault_root = vault_root
+        self.vault_ctx = vault_ctx
         # Define ignore patterns relative to the vault root
         self.ignore_patterns = [".git/", ".obsidian/", "ai_logs/", "node_modules/", ".DS_Store"]
         self.ignore_extensions = [".tmp", "~", ".swp", ".swx", ".crswap"] # Temp/swap file extensions
@@ -31,24 +32,25 @@ class ChangeHandler(FileSystemEventHandler):
         print(f"[ChangeHandler] Ignoring extensions: {self.ignore_extensions}")
 
     def _should_ignore(self, event_path: Path) -> bool:
+        # Convert absolute event_path to relative path string for was_recently_modified_by_agent
+        try:
+            rel_path_str_for_check = event_path.relative_to(self.vault_root).as_posix()
+            if self.vault_ctx.was_recently_modified_by_agent(rel_path_str_for_check):
+                print(f"[ChangeHandler] Ignoring event for {rel_path_str_for_check} as it was recently modified by an agent.")
+                return True
+        except ValueError: # Should not happen if event_path is within vault_root, but as a safeguard
+            pass # If it's outside, other ignore logic will catch it
+
         path_str = str(event_path)
         if any(path_str.endswith(ext) for ext in self.ignore_extensions):
             # print(f"[ChangeHandler] Ignoring file by extension: {path_str}")
             return True
         try:
-            # Check relative path against ignore patterns
-            # This requires event_path to be absolute or correctly relative to vault_root
-            # For safety, ensure event_path is resolved if it might be relative itself.
-            # However, watchdog usually provides absolute paths in event.src_path
-            print(f"[ChangeHandler DEBUG] _should_ignore: Comparing event_path='{str(event_path)}' with self.vault_root='{str(self.vault_root)}'") # DEBUG LINE
             rel_path_str = event_path.relative_to(self.vault_root).as_posix()
-            print(f"[ChangeHandler DEBUG] _should_ignore: relative_to SUCCEEDED, rel_path_str='{rel_path_str}'") # DEBUG LINE
             if any(rel_path_str.startswith(pattern) for pattern in self.ignore_patterns):
                 # print(f"[ChangeHandler] Ignoring path by pattern: {rel_path_str}")
                 return True
-        except ValueError: # If path is not within vault_root
-            # This can happen for temp files created outside the vault, e.g. by some editors
-            # print(f"[ChangeHandler] Path {path_str} is not inside vault root {self.vault_root}. Ignoring.")
+        except ValueError: 
             return True
         return False
 
@@ -118,7 +120,6 @@ class ChangeHandler(FileSystemEventHandler):
 
 
         try:
-            print(f"[ChangeHandler DEBUG] on_any_event: Comparing event_abs_path='{str(event_abs_path)}' with self.vault_root='{str(self.vault_root)}'") # DEBUG LINE
             rel_path_posix = event_abs_path.relative_to(self.vault_root).as_posix()
             print(f"[ChangeHandler] Event: {mapped_event_type} on {rel_path_posix} (abs: {event_abs_path})")
             fs_event_model = FsEvent(
@@ -129,7 +130,6 @@ class ChangeHandler(FileSystemEventHandler):
             )
             self.queue.put_nowait(fs_event_model)
         except ValueError as e_val: # If path is not within vault_root (should be caught by _should_ignore)
-            print(f"[ChangeHandler DEBUG] on_any_event: relative_to FAILED. Exception: {type(e_val).__name__}: {e_val}") # DEBUG LINE
             print(f"[ChangeHandler] Ignoring event outside vault root ({type(event_abs_path).__name__} vs {type(self.vault_root).__name__}): {mapped_event_type} on {event_abs_path}") # Enhanced log
         except Exception as e: # Includes Pydantic validation errors for FsEvent
             print(f"[ChangeHandler] Error creating FsEvent or queueing for {event_abs_path}: {e}")
@@ -402,7 +402,7 @@ async def worker_bee(event_bundle: FsEvent, vault_ctx: VaultCtx):
 async def run_observer(vault_path_str: str, vault_ctx: VaultCtx):
     event_queue = asyncio.Queue()
     # Ensure vault_ctx.root is a Path object for ChangeHandler
-    event_handler = ChangeHandler(event_queue, Path(vault_ctx.root))
+    event_handler = ChangeHandler(event_queue, Path(vault_ctx.root), vault_ctx)
     
     batcher = EventBatcher(event_queue, vault_ctx)
     batcher_task = asyncio.create_task(batcher.run(), name="EventBatcherTask")

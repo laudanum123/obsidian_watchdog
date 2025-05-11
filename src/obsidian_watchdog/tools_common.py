@@ -48,5 +48,9 @@ def write_patch(ctx: RunContext[VaultCtx], rel_path: str, patch: Patch) -> str:
         except Exception as e:
             print(f"Error logging patch to KV store: {e}")
             # Decide if this error should prevent returning "ok"
+    
+    # If write was successful, record it to potentially ignore self-generated events
+    ctx.deps.add_agent_modified_path(rel_path)
+    return "ok"
 
-    return "ok" 
+# Example of a tool that might be used by an agent for more complex reasoning 
