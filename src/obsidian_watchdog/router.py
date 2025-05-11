@@ -1,18 +1,15 @@
 import re
-from pathlib import Path
-from typing import Callable, Optional, List, Tuple, Type, Dict, Any, Coroutine
+from typing import Optional, List, Tuple, Any
 from pydantic_ai import Agent
-from pydantic import BaseModel
-from models import VaultConfig, Patch, FsEvent
-from deps import VaultCtx
+from obsidian_watchdog.models import FsEvent
+from obsidian_watchdog.deps import VaultCtx
 
 # Import agents
-from agents import backlinker # Assuming backlinker.py contains 'backlink_agent'
 # from .agents import digest, flashcard, duplicate_finder # Example for future agents
 
 # Agent specific imports - these would ideally be discovered or registered
 # For now, we explicitly import the agents we know about.
-from agents.backlinker import backlink_agent, run_backlinker_for_event # Assuming backlink_agent is the one to run
+from obsidian_watchdog.agents.backlinker import run_backlinker_for_event # Assuming backlink_agent is the one to run
 
 
 # Define the structure for an agent instance more explicitly if needed

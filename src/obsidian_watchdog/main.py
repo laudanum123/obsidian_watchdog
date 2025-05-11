@@ -9,8 +9,8 @@ import logfire
 import yaml  # For loading config, install with: uv pip install pyyaml
 from openai import AsyncOpenAI
 
-from deps import VaultCtx
-from runner import run_observer
+from obsidian_watchdog.deps import VaultCtx
+from obsidian_watchdog.runner import run_observer
 
 logfire.configure()
 
@@ -53,13 +53,6 @@ DEFAULT_VAULT_PATH = "~/projects/obsidian" # Default, can be overridden by confi
 DEFAULT_CONFIG_PATH = "config.yaml"
 DB_SCHEMA_VERSION = 5 # Increment if schema changes (e.g. storing text content)
 
-# --- BEGIN LOGFIRE SETUP ---
-# import logfire # Removed from here
-# logfire.configure() # Removed from here
-# You can also instrument other libraries here if needed, e.g.:
-# logfire.instrument_httpx(capture_all=True)
-# logfire.instrument_duckdb() # Check logfire docs for specific db instrumentation
-# --- END LOGFIRE SETUP ---
 
 def load_configuration(config_path: str) -> dict:
     """Loads configuration from a YAML file."""

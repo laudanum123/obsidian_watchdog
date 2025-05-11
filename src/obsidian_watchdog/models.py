@@ -14,6 +14,13 @@ class Patch(BaseModel):
     comment: Optional[str] = None  # free‑form
     agent: Optional[str] = None  # who produced it 
 
+class EditScriptAction(BaseModel):
+    script: str = Field(default="", description="The new version of the text block after changes.")
+    original_context_for_script: str = Field(default="", description="The exact, verbatim lines from the Original Note that the 'script' field is intended to replace.")
+    comment: str = Field(description="Explanation of why the change was made or not made.")
+    agent_name: str = Field(description="Name of the agent proposing the edit.")
+    no_change_needed: bool = Field(default=False, description="Set to true if no edit script is generated and no change is intended.")
+
 # New Models based on config.yaml structure
 
 class DatabaseConfig(BaseModel):

@@ -1,7 +1,7 @@
 from datetime import datetime
 from pydantic_ai import RunContext
-from deps import VaultCtx
-from models import Patch
+from obsidian_watchdog.deps import VaultCtx
+from obsidian_watchdog.models import Patch
 
 # Note: pydantic_ai.RunContext might need to be imported differently 
 # depending on the version or specific structure of the pydantic_ai library.

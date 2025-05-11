@@ -7,10 +7,10 @@ from typing import Dict, Tuple, Deque
 from collections import deque
 import hashlib
 
-from models import FsEvent, Patch
+from obsidian_watchdog.models import FsEvent, Patch
 from pydantic_ai import Agent
-from deps import VaultCtx
-from router import get_router
+from obsidian_watchdog.deps import VaultCtx
+from obsidian_watchdog.router import get_router
 
 # Configuration for the event batcher
 EVENT_BATCH_WINDOW_SECONDS = 3.0
