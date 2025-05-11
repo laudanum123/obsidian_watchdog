@@ -3,7 +3,7 @@ import time
 from pathlib import Path
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler, FileSystemEvent
-from typing import Dict, Tuple, Deque
+from typing import Dict, Tuple, Deque, Optional
 from collections import deque
 import hashlib
 
@@ -16,6 +16,7 @@ from obsidian_watchdog.router import get_router
 EVENT_BATCH_WINDOW_SECONDS = 3.0
 MAX_QUEUE_WAIT_SECONDS = 1.0
 PURGE_OLD_EVENTS_SECONDS = 10.0 # Time to wait before flushing an event if no new ones arrive
+HANDLER_DEBOUNCE_SECONDS = 1.5 # Debounce window for ChangeHandler
 
 class ChangeHandler(FileSystemEventHandler):
     """Handles file system events and puts them onto an asyncio queue."""
@@ -30,6 +31,7 @@ class ChangeHandler(FileSystemEventHandler):
         print(f"[ChangeHandler] Initialized. Watching: {self.vault_root}")
         print(f"[ChangeHandler] Ignoring patterns starting with: {self.ignore_patterns}")
         print(f"[ChangeHandler] Ignoring extensions: {self.ignore_extensions}")
+        self._last_event_times: Dict[Path, float] = {} # For debouncing
 
     def _should_ignore(self, event_path: Path) -> bool:
         # Convert absolute event_path to relative path string for was_recently_modified_by_agent
@@ -58,79 +60,58 @@ class ChangeHandler(FileSystemEventHandler):
         if event.is_directory:
             return
 
-        # Watchdog provides src_path; for moves, dest_path is also available.
-        # We'll primarily work with src_path for FsEvent.path
-        # If dest_path is needed, agents/router might need more complex event handling.
         event_abs_path = Path(event.src_path).resolve()
 
         if self._should_ignore(event_abs_path):
             return
 
-        # Ensure event_type is one of our expected FsEvent types
-        # watchdog event_types are 'modified', 'created', 'deleted', 'moved'
-        # FsEvent expects: "created", "modified", "deleted"
         current_event_type = event.event_type
+        mapped_event_type: Optional[str] = None
+
         if current_event_type == 'moved':
-            # For simplicity, we can treat 'moved' as a 'created' event at the destination
-            # and expect a 'deleted' event for the source.
-            # Or, handle it as a special 'moved' type if agents are designed for it.
-            # For now, let's try to map it. A robust solution might emit two events.
-            # Let's focus on the destination of the move as a 'created' or 'modified'
-            # This depends if dest_path is available and makes sense here.
-            # To keep it simple, we'll use 'modified' for 'moved' for now if dest_path is not easily handled.
-            # A 'moved' event implies the file at src_path is gone (like delete) and a new one appears at dest_path (like create)
-            # We will get a 'deleted' for src_path and 'created' for dest_path if observer is on common parent.
-            # So, we can just use the given event.event_type and filter if needed.
-            # The FsEvent model uses "created", "modified", "deleted".
-            # Let's stick to these and map 'moved' appropriately if needed, or ensure handler ignores unmappable.
-            # For now, if it's 'moved', we'll record 'modified' to trigger re-check.
-             print(f"[ChangeHandler] 'moved' event for {event_abs_path}. Associated dest_path: {getattr(event, 'dest_path', 'N/A')}")
-             # We will likely get separate delete and create events for a move within the watched tree.
-             # So, we process the event as its reported type. 'moved' is not in FsEvent.event_type choices.
-             # If we only care about the file at its new location, the 'created' event there is more relevant.
-             # If it's a move *out* of the vault, 'deleted' is key. If *into*, 'created' is key.
-             # Let's use the raw event_type and let FsEvent validation catch it if it's not one of the literals.
-             # FsEvent.event_type: Literal["created", "modified", "deleted"]
-             # So, 'moved' needs to be mapped or the model changed.
-             # Simplest: if moved, treat as modified for now at src_path (which might be the old path).
-             # This is imperfect. A better way is to ensure the FsEvent captures both src and dest for 'moved'
-             # or the batcher/worker can infer this from sequential delete/create.
-             # Given FsEvent structure, we map 'moved' to 'modified' if we must choose one.
-             if current_event_type == 'moved':
-                # This is tricky. Let's assume 'moved' will result in a 'deleted' and 'created'
-                # and we process those. If we see 'moved' directly, it might be from a specific OS behavior.
-                # For now, we'll map 'moved' to 'modified' to ensure it's processed.
-                # Ideally, FsEvent model would handle 'moved' or we'd get discrete create/delete.
-                pass # FsEvent validation will catch this if not mapped.
-
-
-        # Map watchdog event types to FsEvent event types
-        if current_event_type not in ["created", "modified", "deleted"]:
-            # If it's 'moved' or other types we don't explicitly handle in FsEvent's Literal
-            # We can choose to ignore, or map. For now, let's try to map 'moved' to 'modified'.
-            # This is a simplification. True move handling is more complex.
-            if current_event_type == 'moved':
-                mapped_event_type = "modified" # Or create a FsEvent.MOVED type
-                print(f"[ChangeHandler] Mapping 'moved' event to '{mapped_event_type}' for path: {event_abs_path}")
-            else:
-                print(f"[ChangeHandler] Ignoring unhandled watchdog event_type '{current_event_type}' for {event_abs_path}")
-                return
-        else:
+            mapped_event_type = "modified"
+            # print(f"[ChangeHandler] Raw event 'moved', mapping to '{mapped_event_type}' for path: {event_abs_path}")
+        elif current_event_type in ["created", "modified", "deleted"]:
             mapped_event_type = current_event_type
+        else:
+            # This is an event type Watchdog might report but we don't specifically handle (e.g., 'opened', 'closed')
+            # These events should not reset or participate in the debounce timer for create/modify/delete.
+            print(f"[ChangeHandler] Ignoring unhandled watchdog event_type '{current_event_type}' for {event_abs_path}")
+            return
 
+        # At this point, mapped_event_type is "created", "modified", or "deleted".
+        # Now, apply debounce logic for these relevant types.
+        current_time = time.monotonic()
+        last_accepted_event_time = self._last_event_times.get(event_abs_path)
 
+        if last_accepted_event_time and (current_time - last_accepted_event_time) < HANDLER_DEBOUNCE_SECONDS:
+            # print(f"[ChangeHandler] Debouncing '{mapped_event_type}' event for {event_abs_path} (too close to last accepted event)")
+            return # Debounce this event
+
+        # If we've reached here, the event is of a relevant type AND it's not debounced.
+        # Record its time as the last accepted event for this path.
+        self._last_event_times[event_abs_path] = current_time
+
+        # Clean up old entries from _last_event_times to prevent memory leak
+        if len(self._last_event_times) > 1000: # Arbitrary threshold
+            cutoff_time = current_time - (HANDLER_DEBOUNCE_SECONDS * 20) # Clean entries older than 20x debounce window
+            self._last_event_times = {
+                p: t for p, t in self._last_event_times.items() if t > cutoff_time
+            }
+
+        # Proceed to queue the event
         try:
             rel_path_posix = event_abs_path.relative_to(self.vault_root).as_posix()
+            # This is the key log entry we expect to see for actual processed events
             print(f"[ChangeHandler] Event: {mapped_event_type} on {rel_path_posix} (abs: {event_abs_path})")
+            
             fs_event_model = FsEvent(
-                kind=mapped_event_type, # Corrected: Use 'kind' as per FsEvent model
+                kind=mapped_event_type, # type: ignore
                 path=rel_path_posix,
-                # ts is defaulted by model
-                # is_directory=False # is_directory is not a field in FsEvent model
             )
             self.queue.put_nowait(fs_event_model)
-        except ValueError as e_val: # If path is not within vault_root (should be caught by _should_ignore)
-            print(f"[ChangeHandler] Ignoring event outside vault root ({type(event_abs_path).__name__} vs {type(self.vault_root).__name__}): {mapped_event_type} on {event_abs_path}") # Enhanced log
+        except ValueError as e_val: # If path is not within vault_root
+            print(f"[ChangeHandler] Ignoring event outside vault root ({type(event_abs_path).__name__} vs {type(self.vault_root).__name__}): {mapped_event_type} on {event_abs_path}")
         except Exception as e: # Includes Pydantic validation errors for FsEvent
             print(f"[ChangeHandler] Error creating FsEvent or queueing for {event_abs_path}: {e}")
 

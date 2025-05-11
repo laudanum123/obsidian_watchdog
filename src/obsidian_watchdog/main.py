@@ -49,7 +49,7 @@ except ImportError:
     TinyDB = None
     Query = None
 
-DEFAULT_VAULT_PATH = "~/projects/obsidian" # Default, can be overridden by config or env var
+DEFAULT_VAULT_PATH = "/mnt/c/Users/Joerg/My Documents/obsidian/Private/" # Default, can be overridden by config or env var
 DEFAULT_CONFIG_PATH = "config.yaml"
 DB_SCHEMA_VERSION = 5 # Increment if schema changes (e.g. storing text content)
 
