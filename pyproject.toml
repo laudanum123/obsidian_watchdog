@@ -112,6 +112,7 @@ dev = [
     "pytest",
     "pytest-asyncio",
     "pytest-env",
+    "ruff"
     # Add other dev dependencies here, e.g., ruff, mypy
 ]
 
