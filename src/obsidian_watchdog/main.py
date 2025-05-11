@@ -119,8 +119,8 @@ async def populate_notes_db(db: duckdb.DuckDBPyConnection, vault_root: Path, emb
         CREATE TABLE notes (
             path VARCHAR PRIMARY KEY,
             content_hash VARCHAR NOT NULL,
-            modified_at TIMESTAMP NOT NULL,
-            last_embedded_at TIMESTAMP NOT NULL,
+            modified_at TIMESTAMP WITH TIME ZONE NOT NULL,
+            last_embedded_at TIMESTAMP WITH TIME ZONE NOT NULL,
             raw_content TEXT, 
             embedding FLOAT[{embedding_dimensions}]
         );
@@ -147,9 +147,7 @@ async def populate_notes_db(db: duckdb.DuckDBPyConnection, vault_root: Path, emb
     
     notes_to_process = []
     population_config = config.get("db_population", {})
-    # embedding_model_config = config.get("embedding_model", {}) # No longer needed here, defined above
-    # embedding_api_model_name = embedding_model_config.get("model_name", "text-embedding-mxbai-embed-large-v1") # No longer needed here, defined above
-    # embedding_dimensions = embedding_model_config.get("dimensions") # No longer needed here, defined above
+
 
     ignore_patterns = population_config.get("ignore_patterns", [".obsidian/", ".git/", "ai_logs/", "node_modules/"])
     process_all_force = population_config.get("force_reembed_all", False)
@@ -159,12 +157,12 @@ async def populate_notes_db(db: duckdb.DuckDBPyConnection, vault_root: Path, emb
     print(f"[DB Population] Scanning vault: {vault_root} (ignoring: {ignore_patterns}) for markdown files...")
     for filepath in vault_root.glob("**/*.md"):
         try:
-            relative_path_str = str(filepath.relative_to(vault_root))
+            relative_path_str = str(filepath.relative_to(vault_root)).replace("\\", "/") # Normalize path separators
             if any(relative_path_str.startswith(pattern) for pattern in ignore_patterns):
                 continue
 
-            m_time_naive = datetime.fromtimestamp(filepath.stat().st_mtime)
-            m_time_utc = m_time_naive.replace(tzinfo=timezone.utc) # Make it timezone-aware (UTC)
+            # Correctly convert file modification time to timezone-aware UTC
+            m_time_utc = datetime.fromtimestamp(filepath.stat().st_mtime, tz=timezone.utc)
             
             content = filepath.read_text(encoding="utf-8")
             current_hash = hashlib.md5(content.encode('utf-8')).hexdigest()
