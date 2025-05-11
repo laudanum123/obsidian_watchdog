@@ -1,0 +1,46 @@
+# config.yaml - Configuration for the Obsidian Agent
+
+# Path to your Obsidian Vault. 
+# Can be absolute or use ~ for home directory.
+# Environment variable OBSIDIAN_VAULT_PATH will override this if set.
+# vault_path: "~/Documents/ObsidianVault"
+# vault_path: "/path/to/your/obsidian/vault"
+
+# Database settings (for embeddings, metadata, etc.)
+database:
+  name: "obsidian_agent.db" # Name of the DuckDB database file, relative to vault_path
+
+# Key-Value store settings (for logs, state, etc.)
+kv_store:
+  name: "agent_kv_log.json" # Name of the TinyDB JSON file, relative to vault_path
+
+# Application-specific settings for agents or the runner
+application_settings:
+  # Example: LLM model to use by default if not specified per agent
+  default_llm_model: "qwen3-8b"
+  
+  # Example: Settings for the Daily Digest Agent (if you implement one)
+  # daily_digest_agent:
+  #   output_folder: "Digests"
+  #   summary_points: 3
+  #   open_questions: 2
+
+  # Add other configurations as needed for your agents 
+
+embedding_model:
+  provider: "openai_compatible"  # For LM Studio or other OpenAI API compatible
+  # model_name: "mixedbread-ai/mxbai-embed-large-v1" # Or your preferred embedding model from LM Studio
+  model_name: "text-embedding-mxbai-embed-large-v1" # Replace with a model loaded in your LM Studio
+  base_url: "http://192.168.178.20:1234/v1" # Your LM Studio URL
+  api_key: "not-needed"
+  dimensions: 1024 # Optional: if your model supports/requires it (e.g., mxbai-embed-large-v1)
+
+db_population:
+  ignore_patterns:
+    - ".obsidian/"
+    - ".git/"
+    - "ai_logs/"
+    - "node_modules/"
+    # Add any other patterns for directories/files you want to ignore
+  embedding_batch_size: 10 # Number of notes to embed in one go
+  force_reembed_all: false # Set to true to re-embed all notes on next startup 
