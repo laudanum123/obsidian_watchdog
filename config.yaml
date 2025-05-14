@@ -42,5 +42,5 @@ db_population:
     - "ai_logs/"
     - "node_modules/"
     # Add any other patterns for directories/files you want to ignore
-  embedding_batch_size: 10 # Number of notes to embed in one go
+  embedding_batch_size: 50 # Number of notes to embed in one go
   force_reembed_all: false # Set to true to re-embed all notes on next startup 

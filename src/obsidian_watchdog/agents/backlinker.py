@@ -7,7 +7,7 @@ from obsidian_watchdog.models import Patch # EditScriptAction no longer needed h
 from obsidian_watchdog.deps import VaultCtx
 from obsidian_watchdog.tools_common import write_patch
 from textwrap import dedent
-from typing import List, Optional
+from typing import List, Optional, Tuple, Set # Added Tuple, Set
 from pathlib import Path
 from dataclasses import dataclass
 import re # For checking existing links
@@ -131,28 +131,29 @@ async def run_backlinker_for_event(event_path: str, event_type: str, vault_ctx: 
 
         print(f"[Backlinker Runner] Found {len(similar_note_paths)} candidates for {event_path}: {similar_note_paths}")
         
-        links_to_prepend_in_this_run: List[str] = []
-        approved_links_details: List[str] = [] # For logging/comment
+        # Store (similar_path_raw, reason_from_agent) for agent-approved links
+        agent_approved_actions: List[Tuple[str, str]] = [] 
 
-        for similar_path in similar_note_paths:
-            print(f"[Backlinker Runner] Considering linking {event_path} -> {similar_path}")
+        for similar_path_raw in similar_note_paths: # Renamed for clarity
+            print(f"[Backlinker Runner] Considering linking {event_path} -> {similar_path_raw}")
 
-            normalized_similar_path_link = similar_path.replace("\\\\", "/")
-            # Check if link already exists in the original disk content.
-            if f"[[{normalized_similar_path_link}]]" in original_content_on_disk or \
-               f"[[{Path(normalized_similar_path_link).stem}]]" in original_content_on_disk:
-                print(f"[Backlinker Runner] Link to '{similar_path}' already exists in '{event_path}' (on disk). Skipping this candidate.")
+            # Normalize path for checks and link creation (use forward slashes)
+            normalized_similar_path = Path(similar_path_raw).as_posix()
+
+            # Check 1: Link already exists ANYWHERE in the note (wikilink or stem)
+            if f"[[{normalized_similar_path}]]" in original_content_on_disk or \
+               f"[[{Path(normalized_similar_path).stem}]]" in original_content_on_disk:
+                print(f"[Backlinker Runner] Link to '{normalized_similar_path}' (or its stem) already exists anywhere in '{event_path}'. Skipping this candidate.")
                 continue
             
-            # Also check if we've already decided to add this link in the current run (to avoid duplicates if top_k returns same path multiple times somehow)
-            current_link_str_to_check = f"[[{similar_path}]]\\n\\n"
-            if current_link_str_to_check in links_to_prepend_in_this_run:
-                print(f"[Backlinker Runner] Link to '{similar_path}' already slated for prepending in this run. Skipping duplicate consideration.")
+            # Check 2: If this similar_path_raw has already been approved by the agent in *this current run*
+            if any(approved_path == similar_path_raw for approved_path, _ in agent_approved_actions):
+                print(f"[Backlinker Runner] Link to '{similar_path_raw}' already approved by agent in this run. Skipping duplicate consideration.")
                 continue
 
-            similar_note_full_path = vault_ctx.root / similar_path
+            similar_note_full_path = vault_ctx.root / similar_path_raw # Use raw path for file system access
             if not similar_note_full_path.is_file():
-                print(f"[Backlinker Runner] Similar note file not found: {similar_path}. Skipping.")
+                print(f"[Backlinker Runner] Similar note file not found: {similar_path_raw}. Skipping.")
                 continue
             
             similar_content = similar_note_full_path.read_text(encoding="utf-8")
@@ -163,24 +164,24 @@ async def run_backlinker_for_event(event_path: str, event_type: str, vault_ctx: 
             {original_content_on_disk[:500]}...
             ----------------------------------------
 
-            Similar Note ('{similar_path}') Abstract (first 500 chars):
+            Similar Note ('{normalized_similar_path}') Abstract (first 500 chars):
             ----------------------------------------
             {similar_content[:500]}...
             ----------------------------------------
 
-            Review the abstracts above. Should a wikilink of the form '[[{similar_path}]]'
-            be added to the TOP of the Original Note ('{event_path}')?
+            Review the abstracts above. Should a wikilink of the form '[[{normalized_similar_path}]]'
+            be added to the Original Note ('{event_path}')? Your decision will determine if it's added under a "## Backlinks" section.
 
             CRITICAL INSTRUCTIONS: You MUST return a SINGLE `LinkDecision` object.
             NEVER CALL final_result MORE THAN ONCE!!!
             The object should have:
             - 'should_link': true or false.
-            - 'reason': Your concise explanation.
+            - 'reason': Your concise explanation for why it's relevant or not. This reason will be shown next to the link.
             - 'agent_name': 'BacklinkerAgent'.
             """)
             
             try:
-                print(f"[Backlinker Runner] Invoking agent for pair: '{event_path}' and '{similar_path}'...")
+                print(f"[Backlinker Runner] Invoking agent for pair: '{event_path}' and '{similar_path_raw}'...")
                 agent_run_result = await backlink_agent.run(user_message, deps=vault_ctx)
 
                 link_decision_output: Optional[LinkDecision] = None
@@ -191,15 +192,13 @@ async def run_backlinker_for_event(event_path: str, event_type: str, vault_ctx: 
                 
                 if link_decision_output:
                     decision = link_decision_output
-                    print(f"[Backlinker Runner] Agent decision for '{similar_path}': should_link={decision.should_link}. Reason: {decision.reason}")
+                    print(f"[Backlinker Runner] Agent decision for '{similar_path_raw}': should_link={decision.should_link}. Reason: {decision.reason}")
                     
                     if decision.should_link:
-                        link_to_add = f"[[{similar_path}]]\\n\\n"
-                        links_to_prepend_in_this_run.append(link_to_add)
-                        approved_links_details.append(f"[[{similar_path}]] (Reason: {decision.reason})")
-                        print(f"[Backlinker Runner] Agent approved link to '{similar_path}'. Queued for prepending.")
+                        agent_approved_actions.append((similar_path_raw, decision.reason))
+                        print(f"[Backlinker Runner] Agent approved link to '{similar_path_raw}'. Reason: {decision.reason}. Queued for '## Backlinks' section.")
                 else:
-                    log_message = f"[Backlinker Runner] Could not extract LinkDecision for {similar_path}.\n"
+                    log_message = f"[Backlinker Runner] Could not extract LinkDecision for {similar_path_raw}.\n"
                     log_message += f"  Type of agent_run_result: {type(agent_run_result)}\n"
                     if hasattr(agent_run_result, 'output'):
                         log_message += f"  Type of agent_run_result.output: {type(agent_run_result.output)}\n"
@@ -210,50 +209,126 @@ async def run_backlinker_for_event(event_path: str, event_type: str, vault_ctx: 
                     print(log_message)
 
             except Exception as agent_e:
-                print(f"[Backlinker Runner] Error running agent for {event_path} linking to {similar_path}: {agent_e}")
+                print(f"[Backlinker Runner] Error running agent for {event_path} linking to {similar_path_raw}: {agent_e}")
                 import traceback
                 traceback.print_exc()
         
-        # After iterating through all similar notes, apply the accumulated patch if any links were approved.
-        if links_to_prepend_in_this_run:
-            all_new_links_string = "".join(links_to_prepend_in_this_run)
-            modified_content = all_new_links_string + original_content_on_disk
-            
-            patch_comment = f"Agent 'BacklinkerAgent' decided to add the following links to the top: {'; '.join(approved_links_details)}"
-            final_patch = Patch(
-                before=original_content_on_disk,
-                after=modified_content,
-                comment=patch_comment,
-                agent="BacklinkerAgent_Orchestrator" # Using a distinct agent name for the cumulative patch
-            )
-            
-            print(f"[Backlinker Runner] Approved {len(links_to_prepend_in_this_run)} link(s) for '{event_path}'. Preparing to write single patch.")
-            dummy_run_context = RunContext(
-                deps=vault_ctx, 
-                tool_name="write_patch_orchestrator",
-                model="dummy_model_for_tool_call",
-                usage=Usage(),
-                prompt="dummy_prompt_for_tool_call"
-            )
-            write_status = write_patch(ctx=dummy_run_context, rel_path=event_path, patch=final_patch)
-            print(f"[Backlinker Runner] Cumulative patch application status for '{event_path}': {write_status}")
-            if write_status.lower() == "ok":
-                print(f"[Backlinker Runner] Successfully applied cumulative patch to '{event_path}'.")
-                # Update last_backlinked_at for all chunks of this note
-                try:
-                    from datetime import datetime, timezone
-                    now_utc = datetime.now(timezone.utc)
-                    vault_ctx.db.execute(
-                        "UPDATE notes SET last_backlinked_at = ? WHERE path = ?",
-                        [now_utc, event_path]
-                    )
-                    print(f"[Backlinker Runner] Updated last_backlinked_at for '{event_path}' in DB.")
-                except Exception as e:
-                    print(f"[Backlinker Runner] Error updating last_backlinked_at for '{event_path}': {e}")
+        if not agent_approved_actions:
+            print(f"[Backlinker Runner] No new links were approved by the agent for '{event_path}' or all candidates were already handled.")
+            return
+
+        new_bullets_to_render: List[str] = []
+        patch_comment_details: List[str] = []
+        added_to_bullets_in_this_run_normalized: Set[str] = set() 
+
+        backlinks_heading_text = "## Backlinks"
+        backlinks_section_regex = re.compile(
+            rf"(^{re.escape(backlinks_heading_text)}\n)(.*?)($|\n## )", 
+            re.MULTILINE | re.DOTALL | re.IGNORECASE
+        )
+        existing_bullet_link_regex = re.compile(r"-\s*\[\[([^\]]+)\]\]")
+
+        current_content_for_processing = original_content_on_disk
+        section_match = backlinks_section_regex.search(current_content_for_processing)
+
+        existing_links_in_section_normalized: Set[str] = set()
+        if section_match:
+            existing_bullets_area_text = section_match.group(2)
+            for line in existing_bullets_area_text.split('\n'):
+                bullet_link_match = existing_bullet_link_regex.search(line)
+                if bullet_link_match:
+                    existing_links_in_section_normalized.add(Path(bullet_link_match.group(1)).as_posix())
+        
+        for raw_path, reason in agent_approved_actions:
+            normalized_path = Path(raw_path).as_posix()
+            if normalized_path not in existing_links_in_section_normalized and \
+               normalized_path not in added_to_bullets_in_this_run_normalized:
+                
+                bullet_item_text = f"- [[{normalized_path}]] - {reason}"
+                new_bullets_to_render.append(bullet_item_text)
+                patch_comment_details.append(f"[[{normalized_path}]] ({reason})")
+                added_to_bullets_in_this_run_normalized.add(normalized_path)
             else:
-                print(f"[Backlinker Runner] Failed to apply cumulative patch to '{event_path}'.")
+                if normalized_path in existing_links_in_section_normalized:
+                    print(f"[Backlinker Runner] Link to '{normalized_path}' already present in '## Backlinks' section of '{event_path}'. Not adding duplicate bullet.")
+                else: # in added_to_bullets_in_this_run_normalized
+                    print(f"[Backlinker Runner] Link to '{normalized_path}' already queued for '## Backlinks' section in this run. Not adding duplicate bullet.")
+
+        if not new_bullets_to_render:
+            print(f"[Backlinker Runner] All agent-approved links for '{event_path}' are already present in the '## Backlinks' section or were duplicates in this run. No changes to make to section.")
+            return
+
+        new_bullets_block_text = "\n".join(new_bullets_to_render)
+        final_modified_content: str
+
+        if section_match:
+            content_before_bullets_area = current_content_for_processing[:section_match.start(2)]
+            content_after_bullets_area = current_content_for_processing[section_match.end(2):]
+            
+            existing_bullets_text_stripped = section_match.group(2).strip()
+            updated_bullets_area_text: str
+            if existing_bullets_text_stripped:
+                updated_bullets_area_text = existing_bullets_text_stripped + "\n" + new_bullets_block_text
+            else:
+                updated_bullets_area_text = new_bullets_block_text
+            
+            if updated_bullets_area_text: # Ensure single trailing newline if content exists
+                 updated_bullets_area_text = updated_bullets_area_text.rstrip() + "\n"
+
+            final_modified_content = content_before_bullets_area + updated_bullets_area_text + content_after_bullets_area
         else:
-            print(f"[Backlinker Runner] No new links were approved for '{event_path}' during this run.")
+            heading_to_add_str = f"\n\n{backlinks_heading_text}\n"
+            if not current_content_for_processing.strip():
+                heading_to_add_str = f"{backlinks_heading_text}\n"
+            elif not current_content_for_processing.endswith("\n"):
+                heading_to_add_str = f"\n\n{backlinks_heading_text}\n"
+            elif current_content_for_processing.endswith("\n\n"):
+                 heading_to_add_str = f"{backlinks_heading_text}\n"
+            else: 
+                 heading_to_add_str = f"\n{backlinks_heading_text}\n"
+
+            final_modified_content = current_content_for_processing.rstrip() + heading_to_add_str + new_bullets_block_text
+            if not final_modified_content.endswith("\n"): # Ensure trailing newline for new section at EOF
+                final_modified_content += "\n"
+
+
+        if final_modified_content.strip() == original_content_on_disk.strip():
+            print(f"[Backlinker Runner] No effective change to content for '{event_path}' after processing. Skipping patch.")
+            return
+
+        patch_comment_for_tool = f"Agent 'BacklinkerAgent' updated '## Backlinks' section in '{event_path}' with: {'; '.join(patch_comment_details)}"
+        final_patch = Patch(
+            before=original_content_on_disk,
+            after=final_modified_content,
+            comment=patch_comment_for_tool,
+            agent="BacklinkerAgent_Orchestrator"
+        )
+        
+        print(f"[Backlinker Runner] {len(new_bullets_to_render)} new unique link(s) identified for '## Backlinks' section in '{event_path}'. Preparing to write single patch.")
+        dummy_run_context = RunContext(
+            deps=vault_ctx, 
+            tool_name="write_patch_orchestrator",
+            model="dummy_model_for_tool_call",
+            usage=Usage(),
+            prompt="dummy_prompt_for_tool_call"
+        )
+        write_status = write_patch(ctx=dummy_run_context, rel_path=event_path, patch=final_patch)
+        print(f"[Backlinker Runner] Cumulative patch application status for '{event_path}': {write_status}")
+        if write_status.lower() == "ok":
+            print(f"[Backlinker Runner] Successfully applied cumulative patch to '{event_path}'.")
+            # Update last_backlinked_at for all chunks of this note
+            try:
+                from datetime import datetime, timezone
+                now_utc = datetime.now(timezone.utc)
+                vault_ctx.db.execute(
+                    "UPDATE notes SET last_backlinked_at = ? WHERE path = ?",
+                    [now_utc, event_path]
+                )
+                print(f"[Backlinker Runner] Updated last_backlinked_at for '{event_path}' in DB.")
+            except Exception as e:
+                print(f"[Backlinker Runner] Error updating last_backlinked_at for '{event_path}': {e}")
+        else:
+            print(f"[Backlinker Runner] Failed to apply cumulative patch to '{event_path}'.")
 
     except Exception as e:
         print(f"[Backlinker Runner] General error in run_backlinker_for_event for {event_path}: {e}")

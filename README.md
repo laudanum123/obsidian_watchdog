@@ -7,27 +7,31 @@ This project implements a basic framework for creating agents that interact with
 *   **File System Monitoring**: Uses `watchdog` to monitor changes in your Obsidian vault.
 *   **Event Batching**: Groups rapid file modifications to avoid redundant processing.
 *   **Agent Routing**: A simple router (`router.py`) to direct file events to specific agents based on path patterns.
-*   **Pydantic AI Integration**: Agents (`agents/`) are built using `pydantic-ai`, allowing for typed inputs/outputs, tool usage, and interaction with LLMs.
-*   **Dependency Injection**: A `VaultCtx` (`deps.py`) provides agents with access to vault configuration, database connections (DuckDB for embeddings/metadata), and a key-value store (TinyDB for logging).
-*   **Example Agent**: A `BacklinkerAgent` (`agents/backlinker.py`) is provided as a starting point, designed to suggest backlinks for notes (though its core LLM logic and embedding search are placeholders).
+*   **Pydantic AI Integration**: Agents (`src/obsidian_watchdog/agents/`) are built using `pydantic-ai`, allowing for typed inputs/outputs, tool usage, and interaction with LLMs.
+*   **Dependency Injection**: A `VaultCtx` (`src/obsidian_watchdog/deps.py`) provides agents with access to vault configuration, database connections (DuckDB for embeddings/metadata), and a key-value store (TinyDB for logging).
+*   **Example Agent**: A `BacklinkerAgent` (`src/obsidian_watchdog/agents/backlinker.py`) is provided as a starting point, designed to suggest backlinks for notes.
 
 ## Project Structure
 
 ```
 .
-├── agents/                 # Agent implementations
-│   ├── __init__.py
-│   └── backlinker.py       # Example backlinking agent
-├── .venv/                  # Virtual environment (if you create one here)
+├── .venv/                  # Virtual environment
+├── src/                    # Source code
+│   └── obsidian_watchdog/
+│       ├── __init__.py
+│       ├── agents/             # Agent implementations
+│       │   ├── __init__.py
+│       │   └── backlinker.py   # Example backlinking agent
+│       ├── deps.py             # Defines VaultCtx for dependency injection
+│       ├── main.py             # Main entry point to run the agent system
+│       ├── models.py           # Pydantic models for events (FsEvent, Patch)
+│       ├── router.py           # Routes events to appropriate agents
+│       ├── runner.py           # Core event loop, file watcher, and agent execution logic
+│       └── tools_common.py     # Common tools usable by multiple agents
 ├── config.yaml             # Configuration file for vault path, DB, etc.
-├── deps.py                 # Defines VaultCtx for dependency injection
-├── main.py                 # Main entry point to run the agent system
-├── models.py               # Pydantic models for events (FsEvent, Patch)
+├── pyproject.toml          # Python project configuration and dependencies
 ├── README.md               # This file
-├── requirements.txt        # Python dependencies
-├── router.py               # Routes events to appropriate agents
-├── runner.py               # Core event loop, file watcher, and agent execution logic
-└── tools_common.py         # Common tools usable by multiple agents
+└── ...                     # Other project files (.gitignore, etc.)
 ```
 
 ## Setup
@@ -47,14 +51,15 @@ This project implements a basic framework for creating agents that interact with
 3.  **Install Dependencies using `uv`**:
     If you don't have `uv`, install it first (see [uv documentation](https://github.com/astral-sh/uv)).
     ```bash
-    uv pip install -r requirements.txt
+    uv pip install -e .
     ```
-    You might also need to install specific extras for `pydantic-ai` depending on the LLM provider you intend to use (e.g., `pydantic-ai[ollama]` or `pydantic-ai[openai]`). Add this to `requirements.txt` or install manually.
+    This command installs the project in editable mode along with its dependencies defined in `pyproject.toml`.
+    You might also need to install specific extras for `pydantic-ai` depending on the LLM provider you intend to use (e.g., `pydantic-ai[ollama]` or `pydantic-ai[openai]`). You can define these as extras in `pyproject.toml` (e.g., `projectname[ollama]`) or install them manually alongside the main package.
 
 4.  **Configure Your LLM Provider**:
     *   Pydantic AI needs to know how to connect to your LLM. This is often done via environment variables (e.g., `OPENAI_API_KEY` for OpenAI, or `PYDANTIC_AI_OLLAMA_HOST` for a local Ollama instance).
-    *   The example `agents/backlinker.py` uses a model string like `"ollama/mistral:7b-instruct"`. Ensure your chosen LLM (e.g., Ollama) is running and has the specified model downloaded.
-    *   The `main.py` script attempts to set `PYDANTIC_AI_OLLAMA_HOST` if not already set. Adjust this as needed for your setup.
+    *   The example `src/obsidian_watchdog/agents/backlinker.py` uses a model string like `"ollama/mistral:7b-instruct"`. Ensure your chosen LLM (e.g., Ollama) is running and has the specified model downloaded.
+    *   The `src/obsidian_watchdog/main.py` script attempts to set `PYDANTIC_AI_OLLAMA_HOST` if not already set. Adjust this as needed for your setup.
 
 5.  **Configure the Agent**: 
     *   Copy or rename `config.yaml.example` to `config.yaml` if an example is provided, or create `config.yaml`.
@@ -66,7 +71,7 @@ This project implements a basic framework for creating agents that interact with
 Once set up, you can run the agent system from the root directory of the project:
 
 ```bash
-python main.py
+python -m obsidian_watchdog.main
 ```
 
 The script will:
@@ -78,12 +83,12 @@ The script will:
 ## Development
 
 *   **Adding New Agents**: 
-    1.  Create a new Python file in the `agents/` directory (e.g., `agents/digest_agent.py`).
-    2.  Define your agent using `pydantic_ai.Agent`, specifying `deps_type=VaultCtx` and an appropriate `output_type` (likely `Patch` from `models.py` or a custom model).
+    1.  Create a new Python file in the `src/obsidian_watchdog/agents/` directory (e.g., `src/obsidian_watchdog/agents/digest_agent.py`).
+    2.  Define your agent using `pydantic_ai.Agent`, specifying `deps_type=VaultCtx` and an appropriate `output_type` (likely `Patch` from `src/obsidian_watchdog/models.py` or a custom model).
     3.  Implement tools for your agent using the `@agent.tool` decorator.
-    4.  Add rules to `router.py` to direct events to your new agent.
-*   **Tools**: Common tools can be placed in `tools_common.py` and imported by agents.
-*   **Debugging**: Look at the console output for logs from the runner, handler, and agents. Pydantic AI's `capture_run_messages` can be helpful for debugging LLM interactions (see commented-out sections in `runner.py`).
+    4.  Add rules to `src/obsidian_watchdog/router.py` to direct events to your new agent.
+*   **Tools**: Common tools can be placed in `src/obsidian_watchdog/tools_common.py` and imported by agents.
+*   **Debugging**: Look at the console output for logs from the runner, handler, and agents. Pydantic AI's `capture_run_messages` can be helpful for debugging LLM interactions (see commented-out sections in `src/obsidian_watchdog/runner.py`).
 
 ## Important Notes & Caveats
 
@@ -92,11 +97,11 @@ The script will:
 *   **Error Handling**: The current error handling is basic. Robust production systems would need more comprehensive error management, retries, and dead-letter queues for events.
 *   **Idempotency**: The `BacklinkerAgent` and patching mechanism are placeholders. True idempotent operations (applying the same change multiple times having no new effect) are crucial and require careful design, especially with LLM-generated content.
 *   **Security**: Be cautious, especially if agents can write files or execute commands. The current setup is for local execution and assumes you trust the code and the LLM outputs to a reasonable extent within your own vault.
-*   **Atomic Writes**: The `runner.py` attempts atomic writes for patches (write to `.tmp` then replace) to minimize issues with partial writes being picked up by the watcher.
+*   **Atomic Writes**: The `src/obsidian_watchdog/runner.py` attempts atomic writes for patches (write to `.tmp` then replace) to minimize issues with partial writes being picked up by the watcher.
 
 ## Next Steps / Potential Enhancements
 
-*   Implement the actual embedding generation and similarity search for `list_similar_notes` in `agents/backlinker.py`.
+*   Implement the actual embedding generation and similarity search for `list_similar_notes` in `src/obsidian_watchdog/agents/backlinker.py`.
 *   Develop more sophisticated agents from the ideas list.
 *   Add a UI or better CLI for managing agents and viewing logs.
 *   Integrate with Obsidian directly via a plugin for a richer experience.
