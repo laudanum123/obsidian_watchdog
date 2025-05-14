@@ -239,6 +239,17 @@ async def run_backlinker_for_event(event_path: str, event_type: str, vault_ctx: 
             print(f"[Backlinker Runner] Cumulative patch application status for '{event_path}': {write_status}")
             if write_status.lower() == "ok":
                 print(f"[Backlinker Runner] Successfully applied cumulative patch to '{event_path}'.")
+                # Update last_backlinked_at for all chunks of this note
+                try:
+                    from datetime import datetime, timezone
+                    now_utc = datetime.now(timezone.utc)
+                    vault_ctx.db.execute(
+                        "UPDATE notes SET last_backlinked_at = ? WHERE path = ?",
+                        [now_utc, event_path]
+                    )
+                    print(f"[Backlinker Runner] Updated last_backlinked_at for '{event_path}' in DB.")
+                except Exception as e:
+                    print(f"[Backlinker Runner] Error updating last_backlinked_at for '{event_path}': {e}")
             else:
                 print(f"[Backlinker Runner] Failed to apply cumulative patch to '{event_path}'.")
         else:
@@ -264,3 +275,30 @@ if "VaultCtx" not in globals(): # VaultCtx is defined above if running this file
 
 # Cleanup asyncio import if not used elsewhere in the final version of the file.
 # It's used by async tool functions and run_backlinker_for_event. 
+
+# --- Batch backlinker for all notes needing processing ---
+async def run_backlinker_for_all_notes(vault_ctx: VaultCtx):
+    """
+    Runs the backlinker for all notes in the vault that have not been processed
+    since their last modification (last_backlinked_at is NULL or modified_at > last_backlinked_at).
+    """
+    print("[Batch Backlinker] Starting batch backlinking for all notes needing processing...")
+    if not vault_ctx.db:
+        print("[Batch Backlinker] No DB connection in vault_ctx. Aborting.")
+        return
+    try:
+        # Get all unique note paths that need backlinking
+        rows = vault_ctx.db.execute(
+            """
+            SELECT DISTINCT path FROM notes
+            WHERE last_backlinked_at IS NULL OR modified_at > last_backlinked_at
+            """
+        ).fetchall()
+        note_paths = [row[0] for row in rows]
+        print(f"[Batch Backlinker] Found {len(note_paths)} notes to process.")
+        for idx, path in enumerate(note_paths, 1):
+            print(f"[Batch Backlinker] ({idx}/{len(note_paths)}) Processing: {path}")
+            await run_backlinker_for_event(event_path=path, event_type="batch", vault_ctx=vault_ctx)
+        print("[Batch Backlinker] Finished batch backlinking for all notes.")
+    except Exception as e:
+        print(f"[Batch Backlinker] Error during batch backlinking: {e}") 

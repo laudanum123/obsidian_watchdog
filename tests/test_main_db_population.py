@@ -14,7 +14,7 @@ from openai import AsyncOpenAI # For type hinting the mock
 
 # Assuming DB_SCHEMA_VERSION and populate_notes_db are in src.obsidian_watchdog.main
 # Adjust the import path if your structure is different or if you move these.
-from src.obsidian_watchdog.main import DB_SCHEMA_VERSION, populate_notes_db
+from src.obsidian_watchdog.notes_db_manager import DB_SCHEMA_VERSION, populate_notes_db
 
 # Default embedding dimension, matching the one in main.py if not in config
 DEFAULT_EMBEDDING_DIMENSION = 1024
