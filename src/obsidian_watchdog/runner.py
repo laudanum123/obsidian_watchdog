@@ -85,7 +85,7 @@ class ChangeHandler(FileSystemEventHandler):
         last_accepted_event_time = self._last_event_times.get(event_abs_path)
 
         if last_accepted_event_time and (current_time - last_accepted_event_time) < HANDLER_DEBOUNCE_SECONDS:
-            # print(f"[ChangeHandler] Debouncing '{mapped_event_type}' event for {event_abs_path} (too close to last accepted event)")
+            print(f"[ChangeHandler] Debouncing '{mapped_event_type}' event for {event_abs_path} (too close to last accepted event)")
             return # Debounce this event
 
         # If we've reached here, the event is of a relevant type AND it's not debounced.

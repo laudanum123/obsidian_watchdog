@@ -121,6 +121,8 @@ async def run_backlinker_for_event(event_path: str, event_type: str, vault_ctx: 
             print(f"[Backlinker Runner] Original note not found: {event_path}. Skipping.")
             return
         
+        print("BACKLINKER DEBUG: type(original_note_full_path) =", type(original_note_full_path))
+        print("BACKLINKER DEBUG: dir(original_note_full_path) =", dir(original_note_full_path))
         original_content_on_disk = original_note_full_path.read_text(encoding="utf-8")
         
         similar_note_paths = await _get_similar_note_paths_INTERNAL(event_path, vault_ctx, top_k=5)
