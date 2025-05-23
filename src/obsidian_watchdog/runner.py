@@ -308,14 +308,20 @@ async def worker_bee(event_bundle: FsEvent, vault_ctx: VaultCtx):
         print(f"[WorkerBee] Patch object from agent {agent_to_run.__class__.__name__} is missing 'action' or 'content'. Cannot apply. Patch: {patch}")
         return
 
-    if patch.action not in ["CREATE", "DELETE", "APPEND"]: 
+    # For actions that modify an existing file (like APPEND or custom ones),
+    # or actions where the target isn't clear until after the agent runs (potentially),
+    # we first check if the target file (if it's the event source) has changed content or disappeared.
+    print(f"DEBUG_WB: Before L310 conditional block: target='{patch_target_abs_path}', exists='{patch_target_abs_path.exists()}', is_file='{patch_target_abs_path.is_file()}'") # DEBUG
+    if patch.action not in ["CREATE", "DELETE"]: 
         if not patch_target_abs_path.is_file():
             print(f"[WorkerBee] Target file '{patch_target_abs_path}' for patch disappeared or is not a file. Skipping patch.")
             if vault_ctx.kv: 
                 vault_ctx.kv.table("patch_aborted").insert({"timestamp": time.time(), "reason": "target_disappeared", "patch": patch.model_dump() if hasattr(patch, 'model_dump') else str(patch)})
             return
         if hasattr(patch, 'target_path') and patch.target_path == event_bundle.path and event_bundle.kind != 'deleted':
+            print(f"DEBUG_WB: Inside L316 condition, before L317 try: target='{patch_target_abs_path}', exists='{patch_target_abs_path.exists()}', is_file='{patch_target_abs_path.is_file()}'") # DEBUG
             try:
+                print(f"DEBUG_WB: Before L318 read_bytes: patch_target_abs_path='{patch_target_abs_path}', exists='{patch_target_abs_path.exists()}', is_file='{patch_target_abs_path.is_file()}'") # DEBUG
                 current_content_bytes_after_agent = patch_target_abs_path.read_bytes()
                 current_hash_after_agent = hashlib.md5(current_content_bytes_after_agent).hexdigest()
                 if current_hash_after_agent != initial_content_hash:
@@ -333,16 +339,29 @@ async def worker_bee(event_bundle: FsEvent, vault_ctx: VaultCtx):
                 if vault_ctx.kv: 
                     vault_ctx.kv.table("patch_aborted").insert({"timestamp": time.time(), "reason": "target_read_error_pre_patch", "error": str(e), "patch": patch.model_dump() if hasattr(patch, 'model_dump') else str(patch)})
                 return
-            
-    elif patch.action == "CREATE" and patch_target_abs_path.exists():
+
+    # Check if the target file was recently modified by an agent to prevent loops
+    # This applies if the target path exists (for any action) or if it's a CREATE action (path might not exist yet)
+    effective_initial_hash = initial_content_hash if patch_target_abs_path.exists() else None
+    if (patch_target_abs_path.exists() or patch.action == "CREATE") and \
+       vault_ctx.was_recently_modified_by_agent(patch_target_abs_path, effective_initial_hash):
+        print(f"[WorkerBee] File {patch_target_abs_path} was recently modified by an agent (or is a CREATE for a recently touched path). Skipping patch to prevent loops.")
+        if vault_ctx.kv: 
+            vault_ctx.kv.table("patch_aborted").insert({"timestamp": time.time(), "reason": "recently_modified_skip", "patch_target": str(patch_target_abs_path), "initial_hash_provided": effective_initial_hash is not None})
+        return
+
+    # Action-specific pre-conditions before attempting the patch action
+    if patch.action == "CREATE" and patch_target_abs_path.exists():
         print(f"[WorkerBee] Patch action CREATE, but file '{patch_target_abs_path}' already exists. Skipping to avoid overwrite.")
         if vault_ctx.kv: 
             vault_ctx.kv.table("patch_aborted").insert({"timestamp": time.time(), "reason": "create_target_exists", "patch": patch.model_dump() if hasattr(patch, 'model_dump') else str(patch)})
         return
     elif patch.action == "DELETE" and not patch_target_abs_path.is_file():
          print(f"[WorkerBee] Patch action DELETE, but file '{patch_target_abs_path}' does not exist or not a file. Skipping.")
+         if vault_ctx.kv:
+             vault_ctx.kv.table("patch_aborted").insert({"timestamp": time.time(), "reason": "delete_target_not_exist_or_not_file", "patch": patch.model_dump() if hasattr(patch, 'model_dump') else str(patch)})
          return
-
+    
     try:
         if patch.action == "APPEND":
             print(f"[WorkerBee] Appending to {patch_target_abs_path}")
@@ -361,11 +380,11 @@ async def worker_bee(event_bundle: FsEvent, vault_ctx: VaultCtx):
                 vault_ctx.kv.table("patch_aborted").insert({"timestamp": time.time(), "reason": "unknown_patch_action_generic", "patch": patch.model_dump() if hasattr(patch, 'model_dump') else str(patch)})
             return
 
-        print(f"[WorkerBee] Generic patch applied successfully for '{patch_target_abs_path}' by {agent_to_run.__class__.__name__}")
+        print(f"[WorkerBee] Generic patch applied successfully for '{patch_target_abs_path}' by {agent_to_run.name}")
         if vault_ctx.kv:
             event_path_for_log = patch.event_path if hasattr(patch, 'event_path') else event_bundle.path
             vault_ctx.kv.table("applied_patches").insert({
-                "timestamp": time.time(), "agent": agent_to_run.__class__.__name__,
+                "timestamp": time.time(), "agent": agent_to_run.name,
                 "patch_event_path": event_path_for_log,
                 "patch_target_path": (patch.target_path if hasattr(patch, 'target_path') else event_bundle.path),
                 "patch_action": patch.action,
@@ -375,7 +394,7 @@ async def worker_bee(event_bundle: FsEvent, vault_ctx: VaultCtx):
         if vault_ctx.kv:
             target_path_for_log = patch.target_path if hasattr(patch, 'target_path') else event_bundle.path
             vault_ctx.kv.table("failed_patches").insert({
-                "timestamp": time.time(), "agent": agent_to_run.__class__.__name__,
+                "timestamp": time.time(), "agent": agent_to_run.name,
                 "patch_target": target_path_for_log, "patch_action": patch.action, "error": str(e)
             })
 

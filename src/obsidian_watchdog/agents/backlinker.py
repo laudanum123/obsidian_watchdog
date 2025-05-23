@@ -300,6 +300,10 @@ async def run_backlinker_for_event(event_path: str, event_type: str, vault_ctx: 
 
         patch_comment_for_tool = f"Agent 'BacklinkerAgent' updated '## Backlinks' section in '{event_path}' with: {'; '.join(patch_comment_details)}"
         final_patch = Patch(
+            action="MODIFY",
+            target_path=event_path,
+            content=final_modified_content,
+            event_path=event_path,
             before=original_content_on_disk,
             after=final_modified_content,
             comment=patch_comment_for_tool,

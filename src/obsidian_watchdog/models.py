@@ -9,8 +9,12 @@ class FsEvent(BaseModel):
     ts: datetime = Field(default_factory=datetime.utcnow)
 
 class Patch(BaseModel):
-    before: str
-    after: str
+    action: str  # e.g., "CREATE", "APPEND", "DELETE"
+    target_path: str  # Relative to vault root
+    content: str  # For CREATE or APPEND actions
+    event_path: str # Path of the file that triggered the event
+    before: Optional[str] = None # Content before change (for MODIFY, not used by generic worker_bee yet)
+    after: Optional[str] = None # Content after change (for MODIFY, not used by generic worker_bee yet)
     comment: Optional[str] = None  # free‑form
     agent: Optional[str] = None  # who produced it 
 
