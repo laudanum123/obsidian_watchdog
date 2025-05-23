@@ -77,7 +77,11 @@ async def test_initialize_vault_context_happy_path(mock_duckdb_conn, mock_tinydb
         mock_duckdb_module.connect.assert_called_once_with(
             database=str(mock_vault_root / "test_obsidian.db"),
             read_only=False,
-            config={"allow_unsigned_extensions": "true"}
+            config={
+                "allow_unsigned_extensions": "true",
+                "autoinstall_known_extensions": "true",
+                "autoload_known_extensions": "true",
+            }
         )
         mock_duckdb_conn.execute.assert_any_call("INSTALL 'vss';")
         mock_duckdb_conn.execute.assert_any_call("LOAD 'vss';")
@@ -685,7 +689,11 @@ async def test_initialize_vault_context_empty_config(mock_duckdb_conn, mock_tiny
         mock_duckdb_module.connect.assert_called_once_with(
             database=str(mock_vault_root / "obsidian_embeddings.db"), # Default DB name
             read_only=False,
-            config={"allow_unsigned_extensions": "true"}
+            config={
+                "allow_unsigned_extensions": "true",
+                "autoinstall_known_extensions": "true",
+                "autoload_known_extensions": "true",
+            }
         )
         mock_get_embedding_client.assert_not_called()
         mock_populate_notes_db.assert_not_called()
