@@ -12,3 +12,4 @@ tests/.coverage
 .coverage
 .aider*
 .gitignore
+.vscode/settings.json
